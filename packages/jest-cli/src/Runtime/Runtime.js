@@ -31,6 +31,7 @@ class Runtime {
     this._coverageCollectors = Object.create(null);
     this._currentlyExecutingModulePath = '';
     this._explicitShouldMock = Object.create(null);
+    this._resolveExceptions = Object.create(null);
     this._isCurrentlyExecutingManualMock = null;
     this._mockFactories = Object.create(null);
     this._shouldAutoMock = config.automock;
@@ -344,7 +345,7 @@ class Runtime {
     );
   }
 
-  _getNormalizedModuleID(from, moduleName) {
+  _getNormalizedModuleID(from, moduleName, options) {
     const key = from + path.delimiter + moduleName;
     if (normalizedIDCache[key]) {
       return normalizedIDCache[key];
@@ -363,7 +364,13 @@ class Runtime {
         !this._resolver.getModule(moduleName) &&
         !this._resolver.getMockModule(moduleName)
       ) {
-        absolutePath = this._resolveModule(from, moduleName);
+        if (options && options.skipNodeResolution) {
+          absolutePath = path.normalize(path.dirname(from) + '/' + moduleName)
+          this._resolveExceptions[absolutePath] = true;
+          console.log(absolutePath)
+        } else {
+          absolutePath = this._resolveModule(from, moduleName);
+        }
         // Look up if this module has an associated manual mock.
         const mockModule = this._resolver.getMockModule(moduleName);
         if (mockModule) {
@@ -392,9 +399,20 @@ class Runtime {
     return id;
   }
 
-  _shouldMock(from, moduleName) {
+  _getMockPath(from, moduleName) {
+    if (moduleName[0] !== '.' && moduleName[0] !== '/') {
+      return moduleName;
+    }
+    return path.normalize(from + '/' + moduleName);
+  }
+
+  _shouldMock(from, moduleName, options) {
     const explicitShouldMock = this._explicitShouldMock;
-    const moduleID = this._getNormalizedModuleID(from, moduleName);
+    const absolutePath = this._getMockPath(from, moduleName);
+    if (absolutePath in this._resolveExceptions) {
+      options = {skipNodeResolution: true};
+    }
+    const moduleID = this._getNormalizedModuleID(from, moduleName, options);
     const key = from + path.delimiter + moduleID;
 
     if (moduleID in explicitShouldMock) {
@@ -473,17 +491,17 @@ class Runtime {
       this._explicitShouldMock[moduleID] = false;
       return runtime;
     };
-    const mock = (moduleName, mockFactory) => {
+    const mock = (moduleName, mockFactory, options) => {
       if (mockFactory !== undefined) {
-        return setMockFactory(moduleName, mockFactory);
+        return setMockFactory(moduleName, mockFactory, options);
       }
 
       const moduleID = this._getNormalizedModuleID(from, moduleName);
       this._explicitShouldMock[moduleID] = true;
       return runtime;
     };
-    const setMockFactory = (moduleName, mockFactory) => {
-      const moduleID = this._getNormalizedModuleID(from, moduleName);
+    const setMockFactory = (moduleName, mockFactory, options) => {
+      const moduleID = this._getNormalizedModuleID(from, moduleName, options);
       this._explicitShouldMock[moduleID] = true;
       this._mockFactories[moduleID] = mockFactory;
       return runtime;
